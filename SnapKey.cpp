@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <array>
 #include <random>
+#include <thread>
 
 using namespace std;
 namespace fs = std::filesystem;
@@ -76,6 +77,8 @@ HFONT hUiFont = NULL;
 bool isLocked = false;
 int releaseDelayMinMs = 1;
 int releaseDelayMaxMs = 8;
+std::mt19937 releaseDelayGenerator;
+LARGE_INTEGER performanceFrequency = {0};
 
 struct KeyOption {
     int code;
@@ -106,7 +109,10 @@ void CreateDefaultConfig(const std::string& filename);
 void RestoreConfigFromBackup(const std::string& backupFilename, const std::string& destinationFilename);
 std::string GetVersionInfo();
 void SendKey(int target, bool keyDown);
-void SleepRandomReleaseDelay();
+void InitReleaseDelayRuntime();
+int GetRandomReleaseDelayMs();
+void WaitPreciseDelay(int delayMs);
+void SendKeyUpAfterDelay(int targetKey);
 void NormalizeReleaseDelayConfig();
 void UpdateTrayIconState();
 void ToggleSnapKeyState();
@@ -221,6 +227,7 @@ int main() {
     if (!LoadConfig("config.cfg")) {
         return 1;
     }
+    InitReleaseDelayRuntime();
 
     hMutex = CreateMutexW(NULL, TRUE, L"SnapKeyMutex");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
@@ -290,8 +297,7 @@ void handleKeyDown(int keyCode) {
         } else {
             currentGroupInfo.previousKey = currentGroupInfo.activeKey;
             currentGroupInfo.activeKey = keyCode;
-            SleepRandomReleaseDelay();
-            SendKey(currentGroupInfo.previousKey, false);
+            SendKeyUpAfterDelay(currentGroupInfo.previousKey);
         }
     }
 }
@@ -319,27 +325,42 @@ void handleKeyUp(int keyCode) {
 
 bool isSimulatedKeyEvent(DWORD flags) { return flags & 0x10; }
 
-void SleepRandomReleaseDelay() {
-    static thread_local std::mt19937 generator(std::random_device{}());
+void InitReleaseDelayRuntime() {
+    LARGE_INTEGER seedCounter;
+    QueryPerformanceFrequency(&performanceFrequency);
+    QueryPerformanceCounter(&seedCounter);
+
+    unsigned int seed = (unsigned int)(GetTickCount64() ^ seedCounter.QuadPart);
+    releaseDelayGenerator.seed(seed);
+}
+
+int GetRandomReleaseDelayMs() {
     std::uniform_int_distribution<int> distribution(releaseDelayMinMs, releaseDelayMaxMs);
-    int delayMs = distribution(generator);
+    return distribution(releaseDelayGenerator);
+}
+
+void WaitPreciseDelay(int delayMs) {
     if (delayMs <= 0) {
         return;
     }
 
-    static LARGE_INTEGER frequency = []() {
-        LARGE_INTEGER value;
-        QueryPerformanceFrequency(&value);
-        return value;
-    }();
     LARGE_INTEGER start;
     LARGE_INTEGER now;
     QueryPerformanceCounter(&start);
 
-    LONGLONG targetTicks = (frequency.QuadPart * delayMs) / 1000;
+    LONGLONG targetTicks = (performanceFrequency.QuadPart * delayMs) / 1000;
     do {
+        YieldProcessor();
         QueryPerformanceCounter(&now);
     } while (now.QuadPart - start.QuadPart < targetTicks);
+}
+
+void SendKeyUpAfterDelay(int targetKey) {
+    int delayMs = GetRandomReleaseDelayMs();
+    std::thread([targetKey, delayMs]() {
+        WaitPreciseDelay(delayMs);
+        SendKey(targetKey, false);
+    }).detach();
 }
 
 void NormalizeReleaseDelayConfig() {
