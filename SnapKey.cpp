@@ -44,6 +44,8 @@ namespace fs = std::filesystem;
 #define ID_UI_KEY4_COMBO                5013
 #define ID_UI_SAVE_KEYS                 5014
 #define ID_UI_OPEN_CONFIG_FILE          5015
+#define ID_UI_DELAY_MIN_EDIT            5016
+#define ID_UI_DELAY_MAX_EDIT            5017
 
 struct KeyState {
     bool registered = false;
@@ -68,6 +70,8 @@ HWND hStatusLabel = NULL;
 HWND hProfileCombo = NULL;
 HWND hToggleButton = NULL;
 HWND hKeyCombos[4] = { NULL, NULL, NULL, NULL };
+HWND hDelayMinEdit = NULL;
+HWND hDelayMaxEdit = NULL;
 HFONT hUiFont = NULL;
 bool isLocked = false;
 int releaseDelayMinMs = 1;
@@ -118,6 +122,7 @@ void FillKeyCombo(HWND comboBox, int selectedKeyCode);
 std::array<int, 4> ReadConfigKeyValues();
 bool SaveConfigKeyValues(const std::array<int, 4>& keys);
 void RefreshKeyEditorControls();
+bool ReadDelayEditorValues(HWND hwnd, int& minMs, int& maxMs);
 void SaveKeysFromEditor(HWND hwnd);
 
 // select layout via context menu v 1.2.9
@@ -237,7 +242,7 @@ int main() {
     }
 
     HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"SnapKey 中文版", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-                                CW_USEDEFAULT, CW_USEDEFAULT, 560, 520,
+                                CW_USEDEFAULT, CW_USEDEFAULT, 560, 580,
                                 NULL, NULL, wc.hInstance, NULL);
 
     if (hwnd == NULL) {
@@ -436,6 +441,13 @@ void RefreshKeyEditorControls() {
             FillKeyCombo(hKeyCombos[i], keys[i]);
         }
     }
+
+    if (hDelayMinEdit) {
+        SetWindowTextW(hDelayMinEdit, std::to_wstring(releaseDelayMinMs).c_str());
+    }
+    if (hDelayMaxEdit) {
+        SetWindowTextW(hDelayMaxEdit, std::to_wstring(releaseDelayMaxMs).c_str());
+    }
 }
 
 void RefreshMainWindowControls() {
@@ -450,6 +462,37 @@ void RefreshMainWindowControls() {
     if (hProfileCombo && SendMessageW(hProfileCombo, CB_GETCOUNT, 0, 0) == 0) {
         FillProfileCombo(hProfileCombo);
     }
+}
+
+bool ReadDelayEditorValues(HWND hwnd, int& minMs, int& maxMs) {
+    wchar_t minText[16] = {0};
+    wchar_t maxText[16] = {0};
+    GetWindowTextW(hDelayMinEdit, minText, ARRAYSIZE(minText));
+    GetWindowTextW(hDelayMaxEdit, maxText, ARRAYSIZE(maxText));
+
+    wchar_t* minEnd = nullptr;
+    wchar_t* maxEnd = nullptr;
+    long parsedMin = wcstol(minText, &minEnd, 10);
+    long parsedMax = wcstol(maxText, &maxEnd, 10);
+
+    if (minText[0] == L'\0' || maxText[0] == L'\0' || *minEnd != L'\0' || *maxEnd != L'\0') {
+        MessageBoxW(hwnd, L"随机延迟请输入 0 到 1000 之间的整数。", L"SnapKey 配置提示", MB_ICONEXCLAMATION | MB_OK);
+        return false;
+    }
+
+    if (parsedMin < 0 || parsedMax < 0 || parsedMin > 1000 || parsedMax > 1000) {
+        MessageBoxW(hwnd, L"随机延迟范围必须在 0 到 1000 毫秒之间。", L"SnapKey 配置提示", MB_ICONEXCLAMATION | MB_OK);
+        return false;
+    }
+
+    if (parsedMin > parsedMax) {
+        MessageBoxW(hwnd, L"随机延迟最小值不能大于最大值。", L"SnapKey 配置提示", MB_ICONEXCLAMATION | MB_OK);
+        return false;
+    }
+
+    minMs = (int)parsedMin;
+    maxMs = (int)parsedMax;
+    return true;
 }
 
 void SaveKeysFromEditor(HWND hwnd) {
@@ -473,12 +516,21 @@ void SaveKeysFromEditor(HWND hwnd) {
         }
     }
 
+    int newDelayMinMs = releaseDelayMinMs;
+    int newDelayMaxMs = releaseDelayMaxMs;
+    if (!ReadDelayEditorValues(hwnd, newDelayMinMs, newDelayMaxMs)) {
+        return;
+    }
+
+    releaseDelayMinMs = newDelayMinMs;
+    releaseDelayMaxMs = newDelayMaxMs;
+
     if (!SaveConfigKeyValues(keys)) {
         MessageBoxW(hwnd, L"保存配置失败，请检查 config.cfg 是否被占用。", L"SnapKey 错误", MB_ICONERROR | MB_OK);
         return;
     }
 
-    if (MessageBoxW(hwnd, L"按键配置已保存。需要重启 SnapKey 后才会生效，是否现在重启？",
+    if (MessageBoxW(hwnd, L"配置已保存。需要重启 SnapKey 后才会生效，是否现在重启？",
                     L"保存成功", MB_YESNO | MB_ICONQUESTION) == IDYES) {
         RestartSnapKey();
     }
@@ -498,6 +550,14 @@ void CreateMainWindowControls(HWND hwnd) {
         HWND control = CreateWindowExW(0, L"BUTTON", text, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
                                       x, y, width, height, hwnd, (HMENU)(INT_PTR)id, NULL, NULL);
         SendMessageW(control, WM_SETFONT, (WPARAM)hUiFont, TRUE);
+        return control;
+    };
+
+    auto createEdit = [&](int x, int y, int width, int height, int id) -> HWND {
+        HWND control = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_NUMBER,
+                                      x, y, width, height, hwnd, (HMENU)(INT_PTR)id, NULL, NULL);
+        SendMessageW(control, WM_SETFONT, (WPARAM)hUiFont, TRUE);
+        SendMessageW(control, EM_SETLIMITTEXT, 4, 0);
         return control;
     };
 
@@ -531,12 +591,18 @@ void CreateMainWindowControls(HWND hwnd) {
         SendMessageW(hKeyCombos[i], WM_SETFONT, (WPARAM)hUiFont, TRUE);
     }
 
-    createButton(L"保存按键配置", 104, 356, 150, 34, ID_UI_SAVE_KEYS);
-    createText(L"保存后需要重启才会生效。每组内后按下的键会接管前一个键。", 24, 404, 480, 24);
+    createText(L"随机延迟", 24, 356, 90, 24);
+    hDelayMinEdit = createEdit(104, 352, 70, 26, ID_UI_DELAY_MIN_EDIT);
+    createText(L"到", 186, 356, 24, 24);
+    hDelayMaxEdit = createEdit(214, 352, 70, 26, ID_UI_DELAY_MAX_EDIT);
+    createText(L"毫秒", 296, 356, 60, 24);
 
-    createButton(L"使用说明", 24, 438, 104, 34, ID_UI_HELP);
-    createButton(L"关于", 142, 438, 104, 34, ID_UI_ABOUT);
-    createButton(L"退出程序", 368, 438, 104, 34, ID_UI_EXIT);
+    createButton(L"保存配置", 104, 398, 150, 34, ID_UI_SAVE_KEYS);
+    createText(L"保存后需要重启才会生效。随机延迟只作用于同组新按键接管旧按键。", 24, 448, 500, 24);
+
+    createButton(L"使用说明", 24, 492, 104, 34, ID_UI_HELP);
+    createButton(L"关于", 142, 492, 104, 34, ID_UI_ABOUT);
+    createButton(L"退出程序", 368, 492, 104, 34, ID_UI_EXIT);
 
     FillProfileCombo(hProfileCombo);
     RefreshKeyEditorControls();

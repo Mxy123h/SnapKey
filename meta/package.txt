@@ -1,0 +1,21 @@
+This package contains the following files:
+
+----------------main
+config.cfg
+icon.ico
+icon_off.ico
+LICENSE
+README.pdf
+SnapKey.exe
+unins000.dat
+unins000.exe
+----------------meta
+backup.snapkey
+package.txt
+updatelog.txt
+----------------profiles
+ARROW Keys.cfg
+AZERTY Layout.cfg
+CUSTOM Profile.cfg
+ESDF Keys.cfg
+WASD Keys.cfg
