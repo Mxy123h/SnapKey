@@ -6,6 +6,10 @@ key2=68
 key3=83
 key4=87
 
+[Settings]
+releaseDelayMinMs=1
+releaseDelayMaxMs=8
+
 
 # After applying the changes, please restart SnapKey.
 # For further help, visit the README.pdf file.

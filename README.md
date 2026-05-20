@@ -62,9 +62,15 @@ key2=68
 [Group]
 key3=83
 key4=87
+
+[Settings]
+releaseDelayMinMs=1
+releaseDelayMaxMs=8
 ```
 
 每个 `[Group]` 表示一组互斥按键。同一组里，后按下的按键会临时接管输入，之前的按键会被释放。不同组之间互不影响。
+
+`[Settings]` 中的 `releaseDelayMinMs` 和 `releaseDelayMaxMs` 控制“同组新按键接管旧按键”时，释放旧按键前的随机延迟范围，单位为毫秒。默认 `1-8` 表示每次随机等待 1 到 8 毫秒；修改后需要重启 SnapKey 生效。
 
 常用按键代码：
 

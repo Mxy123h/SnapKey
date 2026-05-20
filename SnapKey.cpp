@@ -11,6 +11,7 @@
 #include <vector>
 #include <filesystem>
 #include <array>
+#include <random>
 
 using namespace std;
 namespace fs = std::filesystem;
@@ -69,6 +70,8 @@ HWND hToggleButton = NULL;
 HWND hKeyCombos[4] = { NULL, NULL, NULL, NULL };
 HFONT hUiFont = NULL;
 bool isLocked = false;
+int releaseDelayMinMs = 1;
+int releaseDelayMaxMs = 8;
 
 struct KeyOption {
     int code;
@@ -99,6 +102,8 @@ void CreateDefaultConfig(const std::string& filename);
 void RestoreConfigFromBackup(const std::string& backupFilename, const std::string& destinationFilename);
 std::string GetVersionInfo();
 void SendKey(int target, bool keyDown);
+void SleepRandomReleaseDelay();
+void NormalizeReleaseDelayConfig();
 void UpdateTrayIconState();
 void ToggleSnapKeyState();
 void OpenHelpDocument();
@@ -182,9 +187,13 @@ bool SaveConfigKeyValues(const std::array<int, 4>& keys) {
     configFile << "key2=" << keys[1] << "\n\n";
     configFile << "[Group]\n";
     configFile << "key3=" << keys[2] << "\n";
-    configFile << "key4=" << keys[3] << "\n\n\n";
+    configFile << "key4=" << keys[3] << "\n\n";
+    configFile << "[Settings]\n";
+    configFile << "releaseDelayMinMs=" << releaseDelayMinMs << "\n";
+    configFile << "releaseDelayMaxMs=" << releaseDelayMaxMs << "\n\n\n";
     configFile << "# 修改并保存后，请在界面点击“重启并应用”。\n";
     configFile << "# 也可以继续使用界面中的按键编辑区调整这四个按键。\n";
+    configFile << "# releaseDelayMinMs / releaseDelayMaxMs：同组新按键接管旧按键时，释放旧按键前的随机延迟范围（毫秒）。\n";
     configFile << "# 更多按键绑定说明：https://github.com/cafali/SnapKey/wiki/Rebinding-Keys\n\n";
     configFile << "# 常用默认方案：\n";
     configFile << "# AZERTY: key1=81 key2=68 / key3=90 key4=83\n";
@@ -276,6 +285,7 @@ void handleKeyDown(int keyCode) {
         } else {
             currentGroupInfo.previousKey = currentGroupInfo.activeKey;
             currentGroupInfo.activeKey = keyCode;
+            SleepRandomReleaseDelay();
             SendKey(currentGroupInfo.previousKey, false);
         }
     }
@@ -303,6 +313,24 @@ void handleKeyUp(int keyCode) {
 }
 
 bool isSimulatedKeyEvent(DWORD flags) { return flags & 0x10; }
+
+void SleepRandomReleaseDelay() {
+    static thread_local std::mt19937 generator(std::random_device{}());
+    std::uniform_int_distribution<int> distribution(releaseDelayMinMs, releaseDelayMaxMs);
+    Sleep(static_cast<DWORD>(distribution(generator)));
+}
+
+void NormalizeReleaseDelayConfig() {
+    if (releaseDelayMinMs < 0) releaseDelayMinMs = 0;
+    if (releaseDelayMaxMs < 0) releaseDelayMaxMs = 0;
+    if (releaseDelayMinMs > 1000) releaseDelayMinMs = 1000;
+    if (releaseDelayMaxMs > 1000) releaseDelayMaxMs = 1000;
+    if (releaseDelayMinMs > releaseDelayMaxMs) {
+        int temp = releaseDelayMinMs;
+        releaseDelayMinMs = releaseDelayMaxMs;
+        releaseDelayMaxMs = temp;
+    }
+}
 
 void SendKey(int targetKey, bool keyDown) {
     INPUT input = {0};
@@ -740,6 +768,11 @@ bool LoadConfig(const std::string& filename) {
     string line;
     int id = 0;
     while (getline(configFile, line)) {
+        size_t firstChar = line.find_first_not_of(" \t\r\n");
+        if (firstChar == string::npos || line[firstChar] == '#') {
+            continue;
+        }
+
         istringstream iss(line);
         string key;
         int value;
@@ -747,7 +780,11 @@ bool LoadConfig(const std::string& filename) {
         if (regex_match(line, secPat)) {
             id++;
         } else if (getline(iss, key, '=') && (iss >> value)) {
-            if (key.find("key") != string::npos) {
+            if (key == "releaseDelayMinMs") {
+                releaseDelayMinMs = value;
+            } else if (key == "releaseDelayMaxMs") {
+                releaseDelayMaxMs = value;
+            } else if (key.find("key") != string::npos) {
                 if (!KeyInfo[value].registered) {
                     KeyInfo[value].registered = true;
                     KeyInfo[value].group = id;
@@ -760,5 +797,6 @@ bool LoadConfig(const std::string& filename) {
             }
         }
     }
+    NormalizeReleaseDelayConfig();
     return true;
 }
