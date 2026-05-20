@@ -322,7 +322,24 @@ bool isSimulatedKeyEvent(DWORD flags) { return flags & 0x10; }
 void SleepRandomReleaseDelay() {
     static thread_local std::mt19937 generator(std::random_device{}());
     std::uniform_int_distribution<int> distribution(releaseDelayMinMs, releaseDelayMaxMs);
-    Sleep(static_cast<DWORD>(distribution(generator)));
+    int delayMs = distribution(generator);
+    if (delayMs <= 0) {
+        return;
+    }
+
+    static LARGE_INTEGER frequency = []() {
+        LARGE_INTEGER value;
+        QueryPerformanceFrequency(&value);
+        return value;
+    }();
+    LARGE_INTEGER start;
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&start);
+
+    LONGLONG targetTicks = (frequency.QuadPart * delayMs) / 1000;
+    do {
+        QueryPerformanceCounter(&now);
+    } while (now.QuadPart - start.QuadPart < targetTicks);
 }
 
 void NormalizeReleaseDelayConfig() {
