@@ -14,12 +14,12 @@ FILETYPE 0x1
     {
         BLOCK "040904B0"
         {
-            VALUE "FileDescription", "SnapKey"
+            VALUE "FileDescription", "SnapKey 中文版"
             VALUE "InternalName", "SnapKey.exe"
             VALUE "OriginalFilename", "SnapKey.exe"
             VALUE "CompanyName", "cafali"
             VALUE "LegalCopyright", "Copyright \xA9 2025 cafali - MIT License (github.com/cafali/SnapKey)"
-            VALUE "ProductName", "SnapKey"
+            VALUE "ProductName", "SnapKey 中文版"
             VALUE "FileVersion", "1.2.9.0"
             VALUE "ProductVersion", "1.2.9.0"
         }

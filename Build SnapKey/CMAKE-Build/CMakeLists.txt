@@ -3,11 +3,20 @@ project(SnapKey)
 
 # include_directories(${CMAKE_CURRENT_SOURCE_DIR}) --- unnecessary
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} /MT")
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} /MTd")
 set(BUILD_SHARED_LIBS OFF)
+
+if (MSVC)
+    add_compile_options(/utf-8)
+elseif (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(-finput-charset=UTF-8 -fexec-charset=UTF-8)
+endif()
 
 add_executable(SnapKey SnapKey.cpp resources.rc)
 

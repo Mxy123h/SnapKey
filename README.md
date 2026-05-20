@@ -1,132 +1,116 @@
-[![testsnap](https://github.com/user-attachments/assets/e9a23ba9-d394-4711-abfc-994932605d86)](https://github.com/cafali/SnapKey/releases)
+# SnapKey 中文版
 
-**About SnapKey** 
---------------------------------------------------------------------------------------------------
-SnapKey provides a user-friendly alternative to the Razer Snap Tap function, making it accessible across all keyboards!
+SnapKey 是一个轻量级 Windows 托盘工具，用来优化同一方向组内的按键输入。默认配置会处理 `A/D` 与 `W/S` 两组按键：当同一组里的新按键被按下时，程序会自动释放上一枚仍处于按下状态的按键，让输入切换更干净、更及时。
 
-SnapKey is a lightweight, open-source tool that operates from the system tray and is designed to track inputs from the WASD keys, without interfering with any game files. Its main role is to recognize when these keys are pressed and automatically release any previously engaged commands for them. This guarantees responsive and precise input handling. SnapKey handles the WASD keys by default and lets you rebind them to your liking via the config file.
+本项目已做中文化与易用性调整：主窗口、托盘菜单、提示信息、配置说明和项目文档均改为中文；核心按键处理逻辑保持原样。
 
-**Need More Info on SnapKey?** Visit the [**SnapKey Wiki**](https://github.com/cafali/SnapKey/wiki)
+## 主要功能
 
-[![COMPATIBLE](https://github.com/user-attachments/assets/069a7a23-cfe4-47eb-8ac2-05872fcc2028)](https://github.com/cafali/SnapKey/wiki/Compatibility-List)
+- 从系统托盘运行，占用轻量。
+- 默认支持 `A/D`、`W/S` 两组按键。
+- 支持通过 `config.cfg` 自定义按键。
+- 提供中文主窗口，可直接暂停/启用、界面化编辑按键、切换方案和重启应用。
+- 支持托盘菜单切换内置配置方案。
+- 支持双击托盘图标打开主窗口。
+- 不修改游戏文件，按键处理基于 Windows API。
 
+## 快速使用
 
+1. 运行 `SnapKey.exe`。
+2. 程序会打开中文主窗口，并同时显示在系统托盘。
+3. 在主窗口中可查看当前状态、暂停/启用、编辑按键、选择配置方案。
+4. 关闭主窗口不会退出程序，SnapKey 会继续留在托盘运行。
+5. 需要再次打开窗口时，双击托盘图标，或右键托盘图标选择“打开主界面”。
+6. 修改配置后，点击“重启并应用”。
 
-Download
---------------------------------------------------------------------------------------------------
-<p align="center">
-  <a href="https://github.com/cafali/SnapKey/releases">Download from GitHub</a> |
-  <a href="https://sourceforge.net/projects/snapkey/">Download from SourceForge</a> |
-  <a href="https://www.softpedia.com/get/Tweak/System-Tweak/SnapKey.shtml">Download from Softpedia</a>
-</p>
+## 主窗口说明
 
+- `当前状态`：显示 SnapKey 当前是否正在处理按键。
+- `暂停 SnapKey` / `启用 SnapKey`：临时关闭或恢复按键处理。
+- `界面化编辑按键`：用下拉框编辑两组互斥按键。
+- `保存按键配置`：把下拉框选择写入 `config.cfg`，并可立即重启生效。
+- `打开配置文件`：高级用法，直接打开 `config.cfg`。
+- `重启并应用`：重启程序，让配置文件变更生效。
+- `配置方案`：选择 `meta/profiles` 里的方案。
+- `应用方案`：写入所选方案并自动重启。
+- `使用说明`：打开本 README。
+- `关于`：显示版本和操作提示。
+- `退出程序`：彻底关闭 SnapKey。
 
-[![latesver](https://github.com/user-attachments/assets/09694f7c-6eeb-4c80-9a02-1d777956d181)](https://github.com/cafali/SnapKey/wiki/Updates)
+## 托盘菜单说明
 
-**SnapKey Features**
---------------------------------------------------------------------------------------------------
-- Easy to use 🧩
-- Detailed documentation 📖
-- Lightweight and open-source 🌟
-- Accessible via the system tray 🖥️
-- Compatible with all keyboards ✅
-- Does not interact with game files 🎮
-- Activate/Deactivate via context menu ⛔
-- Double-click the tray icon to disable it 👆👆
-- Built‑in and custom keyboard layout profiles 🗂️
-- Sticky Keys Feature: tracks the state of a pressed key ⌨️
-- Enhances the precision of counter-strafing movements in games 🎯
-- Allows key rebinding using ASCII codes specified in the configuration file 🛠️
-- Supports unlimited amount of keys shared across groups (default AD / WS) 🔄
-- Facilitates smoother transitions between left and right movements without input conflicts 🚀
-- Does not use AutoHotkey or similar tools; its features rely solely on Windows API functions 🛡️
+- `当前状态`：显示 SnapKey 当前是已启用还是已暂停。
+- `打开主界面`：显示中文主窗口。
+- `编辑按键配置`：打开主窗口，在界面中修改按键绑定。
+- `选择配置方案`：从 `meta/profiles` 目录选择内置或自定义方案。
+- `重启并应用配置`：重新启动程序，让配置变更生效。
+- `暂停 SnapKey` / `启用 SnapKey`：临时关闭或恢复按键处理。
+- `使用说明`：打开本 README。
+- `检查更新`：打开原项目发布页面。
+- `关于 SnapKey`：查看版本、项目地址和常用操作提示。
+- `退出 SnapKey`：关闭程序。
 
-**SnapKey in Action**
---------------------------------------------------------------------------------------------------
-- When you press and hold down the **"A"** key, SnapKey remembers it.
-- If you then press the **"D"** key while still holding down **"A"** SnapKey automatically releases the **"A"** key for you.
-- The same happens if you press **"A"** while holding **"D"** — SnapKey releases the **"D"** key.
+## 配置文件
 
-**SnapKey prevents simultaneous movement key conflicts (AD / WS)**
+默认配置位于 `config.cfg`：
 
-- In many FPS games, pressing both the **"A"** and **"D"** keys simultaneously typically results in the game recognizing conflicting inputs. SnapKey automatically releases the previously held key when a new key input is detected.
-- The keys are separated into two different groups: A/D and W/S. In each group, **"A"** cancels out **"D"** and vice versa, while the same applies to **"W"** and **"S"**. These groups do not interfere with each other and work separately.
+```ini
+[Group]
+key1=65
+key2=68
 
-**Sticky Keys**
+[Group]
+key3=83
+key4=87
+```
 
-- Sticky Keys is a feature that keeps track of the state of a key you've pressed down. For example, if you 
-hold down the **"A"** key and tap the **"D"** key repeatedly, each press of **"D"** will temporarily override 
-the **"A"** key. When you release the **"D"** key, the action associated with the **"A"** key will resume, as 
-long as you're still holding it down. The same principle applies if you start with **"D"** held down and 
-press **"A"** instead.
+每个 `[Group]` 表示一组互斥按键。同一组里，后按下的按键会临时接管输入，之前的按键会被释放。不同组之间互不影响。
 
-> [!NOTE]
-> SnapKey and similar solutions have been disallowed in certain games; illustrations shown are for demonstrative purposes only.
+常用按键代码：
 
-![Snapkey](https://github.com/user-attachments/assets/504ffa5e-50d3-4a77-9016-70f22d143cb1)
+| 按键 | 代码 |
+|---|---:|
+| A | 65 |
+| D | 68 |
+| W | 87 |
+| S | 83 |
+| 上 | 38 |
+| 下 | 40 |
+| 左 | 37 |
+| 右 | 39 |
+| 空格 | 32 |
+| ESC | 27 |
 
-**Enhanced precision of counter-strafing**
+更多按键代码可查看 `config.cfg` 文件底部的中文注释。
 
-- Automatically releases a previously held key when a new key (A/D) & (W/S) is pressed.
+## 配置方案
 
-<img src="https://github.com/user-attachments/assets/4453aba4-b9bc-45e8-8a80-80caad39347b" width="600" height="338" alt="STRAFE">
+内置配置方案位于 `meta/profiles`：
 
-**Linux Support**
---------------------------------------------------------------------------------------------------
-Since SnapKey isn’t natively supported on Linux, it’s recommended to check out @Dillacorn's guide on **[running SnapKey on Linux](https://github.com/cafali/SnapKey/issues/4#issuecomment-2251568839)**.
+- `WASD Keys.cfg`：WASD 默认方案。
+- `ARROW Keys.cfg`：方向键方案。
+- `AZERTY Layout.cfg`：AZERTY 键盘方案。
+- `ESDF Keys.cfg`：ESDF 方案。
+- `CUSTOM Profile.cfg`：自定义方案模板。
 
-[![LINUX baner](https://github.com/user-attachments/assets/794a16ed-b0ab-4320-a680-52bda1ca0fd1)](https://github.com/cafali/SnapKey/wiki/Setup-Linux)
+选择配置方案后，程序会把对应方案写入 `config.cfg` 并自动重启。
 
-Looking for More Information? Got Questions or Need Help?
---------------------------------------------------------------------------------------------------
-[<img src="https://github.com/user-attachments/assets/0c6d7564-6471-49f2-9367-64f7bffb7e37" alt="Wikitest" width="50%" />](https://github.com/cafali/SnapKey/wiki)
+## 注意事项
 
-- **[About ℹ️](https://github.com/cafali/SnapKey/wiki/About)**  
-  Discover SnapKey, explore its features and see how it can benefit you
+- 修改 `config.cfg` 后必须重启 SnapKey 才会生效。
+- 同一个按键不要重复写入多个分组，否则程序会提示配置错误。
+- 某些游戏或平台可能不允许使用类似输入辅助工具，请先了解对应规则。
+- 如果托盘图标显示为暂停状态，按键处理不会生效。
 
-- **[Code Breakdown 🧠](https://github.com/cafali/SnapKey/wiki/Code-Breakdown)**  
-  Dive into the details of SnapKey’s code structure
+## 构建
 
-- **[Compatibility List 🎮](https://github.com/cafali/SnapKey/wiki/Compatibility-List)**  
-  Compatibility status of games with SnapKey
+项目主体是单文件 Win32/C++ 程序，源码入口为 `SnapKey.cpp`。可使用项目内的构建脚本或 CMake 配置进行编译：
 
-- **[FAQ❓](https://github.com/cafali/SnapKey/wiki/FAQ)**  
-  Find answers to common questions about SnapKey
+- `Build SnapKey/CMAKE-Build/CMakeLists.txt`
+- `Build SnapKey/MSYS-Build/MSYS-Build.bat`
 
-- **[License 📜](https://github.com/cafali/SnapKey/wiki/License)**  
-  Overview of SnapKey’s licensing
+## 原项目
 
-- **[Rebinding Keys ⌨️](https://github.com/cafali/SnapKey/wiki/Rebinding-Keys)**  
-  Instructions on how to rebind keys
-
-- **[Setup 🛠️](https://github.com/cafali/SnapKey/wiki/Setup)**  
-  General setup instructions for getting Snapkey up and running on your system
-
-- **[Setup Linux 🐧](https://github.com/cafali/SnapKey/wiki/Setup-Linux)**  
-  Setting up SnapKey on Linux distributions
-
-- **[System Requirements 🖥️](https://github.com/cafali/SnapKey/wiki/System-Requirements)**  
-  SnapKey System Requirements
-
-- **[Troubleshoot 🔧](https://github.com/cafali/SnapKey/wiki/Troubleshoot)**  
-  Solutions and tips for troubleshooting common issues with SnapKey
-
-- **[Changelog 🔄](https://github.com/cafali/SnapKey/wiki/Updates)**  
-  View SnapKey releases and changes
-----
-
-<p align="center">
-  SnapKey by
-</p>
-
-<p align="center">
-  <a href="https://github.com/cafali">@cafali</a> 
-  <a href="https://github.com/minteeaa">@minteeaa</a> 
-  <a href="https://github.com/Yaw-Dev">@Yaw-Dev</a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/cafali/Snapkey/graphs/contributors">
-    <img src="https://contrib.rocks/image?repo=cafali/Snapkey" />
-  </a>
-</p>
+- 仓库：https://github.com/cafali/SnapKey
+- 许可证：MIT License
+- 当前版本：SnapKey v1.2.9

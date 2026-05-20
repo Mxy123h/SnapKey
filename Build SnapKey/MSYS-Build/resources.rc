@@ -14,12 +14,12 @@ FILETYPE 0x1
     {
         BLOCK "040904B0"
         {
-            VALUE "FileDescription", "SnapKey"
+            VALUE "FileDescription", "SnapKey 中文版"
             VALUE "InternalName", "SnapKey.exe"
             VALUE "OriginalFilename", "SnapKey.exe"
             VALUE "CompanyName", "SnapKey"
             VALUE "LegalCopyright", ""
-            VALUE "ProductName", "SnapKey"
+            VALUE "ProductName", "SnapKey 中文版"
             VALUE "FileVersion", "0.0.0.0"
             VALUE "ProductVersion", "0.0.0.0"
         }

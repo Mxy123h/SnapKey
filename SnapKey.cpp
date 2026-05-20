@@ -10,6 +10,7 @@
 #include <regex>
 #include <vector>
 #include <filesystem>
+#include <array>
 
 using namespace std;
 namespace fs = std::filesystem;
@@ -23,8 +24,25 @@ namespace fs = std::filesystem;
 #define ID_TRAY_HELP                    3005
 #define ID_TRAY_CHECKUPDATE             3006
 #define ID_TRAY_LAYOUTS                 3007
+#define ID_TRAY_STATUS                  3008
+#define ID_TRAY_SHOW_WINDOW             3009
 #define WM_TRAYICON                     (WM_USER + 1)
 #define ID_LAYOUT_BASE                  4000 // 1.2.9
+#define ID_UI_STATUS_LABEL              5001
+#define ID_UI_PROFILE_COMBO             5002
+#define ID_UI_APPLY_PROFILE             5003
+#define ID_UI_TOGGLE_LOCK               5004
+#define ID_UI_EDIT_CONFIG               5005
+#define ID_UI_RESTART                   5006
+#define ID_UI_HELP                      5007
+#define ID_UI_ABOUT                     5008
+#define ID_UI_EXIT                      5009
+#define ID_UI_KEY1_COMBO                5010
+#define ID_UI_KEY2_COMBO                5011
+#define ID_UI_KEY3_COMBO                5012
+#define ID_UI_KEY4_COMBO                5013
+#define ID_UI_SAVE_KEYS                 5014
+#define ID_UI_OPEN_CONFIG_FILE          5015
 
 struct KeyState {
     bool registered = false;
@@ -43,8 +61,34 @@ unordered_map<int, KeyState> KeyInfo;
 
 HHOOK hHook = NULL;
 HANDLE hMutex = NULL;
-NOTIFYICONDATA nid;
+NOTIFYICONDATAW nid;
+HWND hMainWindow = NULL;
+HWND hStatusLabel = NULL;
+HWND hProfileCombo = NULL;
+HWND hToggleButton = NULL;
+HWND hKeyCombos[4] = { NULL, NULL, NULL, NULL };
+HFONT hUiFont = NULL;
 bool isLocked = false;
+
+struct KeyOption {
+    int code;
+    const wchar_t* label;
+};
+
+const vector<KeyOption> KEY_OPTIONS = {
+    {65, L"A"}, {66, L"B"}, {67, L"C"}, {68, L"D"}, {69, L"E"}, {70, L"F"},
+    {71, L"G"}, {72, L"H"}, {73, L"I"}, {74, L"J"}, {75, L"K"}, {76, L"L"},
+    {77, L"M"}, {78, L"N"}, {79, L"O"}, {80, L"P"}, {81, L"Q"}, {82, L"R"},
+    {83, L"S"}, {84, L"T"}, {85, L"U"}, {86, L"V"}, {87, L"W"}, {88, L"X"},
+    {89, L"Y"}, {90, L"Z"},
+    {38, L"方向键 上"}, {40, L"方向键 下"}, {37, L"方向键 左"}, {39, L"方向键 右"},
+    {32, L"空格"}, {27, L"ESC"}, {8, L"退格"}, {46, L"DEL"},
+    {160, L"左 Shift"}, {161, L"右 Shift"}, {162, L"左 Ctrl"}, {163, L"右 Ctrl"},
+    {164, L"Alt"},
+    {96, L"小键盘 0"}, {97, L"小键盘 1"}, {98, L"小键盘 2"}, {99, L"小键盘 3"},
+    {100, L"小键盘 4"}, {101, L"小键盘 5"}, {102, L"小键盘 6"}, {103, L"小键盘 7"},
+    {104, L"小键盘 8"}, {105, L"小键盘 9"}
+};
 
 // Forward declarations
 LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
@@ -55,6 +99,21 @@ void CreateDefaultConfig(const std::string& filename);
 void RestoreConfigFromBackup(const std::string& backupFilename, const std::string& destinationFilename);
 std::string GetVersionInfo();
 void SendKey(int target, bool keyDown);
+void UpdateTrayIconState();
+void ToggleSnapKeyState();
+void OpenHelpDocument();
+std::wstring GetLayoutDisplayName(const std::string& layoutName);
+std::wstring GetVersionInfoText();
+void CreateMainWindowControls(HWND hwnd);
+void RefreshMainWindowControls();
+void ShowMainWindow(HWND hwnd);
+void FillProfileCombo(HWND comboBox);
+void ApplySelectedProfile(HWND hwnd);
+void FillKeyCombo(HWND comboBox, int selectedKeyCode);
+std::array<int, 4> ReadConfigKeyValues();
+bool SaveConfigKeyValues(const std::array<int, 4>& keys);
+void RefreshKeyEditorControls();
+void SaveKeysFromEditor(HWND hwnd);
 
 // select layout via context menu v 1.2.9
 vector<string> ListLayouts() {
@@ -82,19 +141,64 @@ void ApplyLayout(const string& layoutName) {
     ofstream dst(destPath, ios::binary | ios::trunc);
 
     if (!src.is_open() || !dst.is_open()) {
-        MessageBox(NULL, TEXT("Failed to apply layout. Please check the layout file."),
-                   TEXT("SnapKey Error"), MB_ICONERROR | MB_OK);
+        MessageBoxW(NULL, L"无法应用该配置方案，请检查配置文件是否存在或是否被占用。",
+                    L"SnapKey 错误", MB_ICONERROR | MB_OK);
         return;
     }
 
     dst << src.rdbuf(); // copy file contents
 }
 
+std::array<int, 4> ReadConfigKeyValues() {
+    std::array<int, 4> keys = {65, 68, 83, 87};
+    std::ifstream configFile("config.cfg");
+    if (!configFile.is_open()) {
+        return keys;
+    }
+
+    string line;
+    int keyIndex = 0;
+    while (getline(configFile, line) && keyIndex < 4) {
+        istringstream iss(line);
+        string key;
+        int value;
+        if (getline(iss, key, '=') && (iss >> value) && key.find("key") != string::npos) {
+            keys[keyIndex] = value;
+            keyIndex++;
+        }
+    }
+
+    return keys;
+}
+
+bool SaveConfigKeyValues(const std::array<int, 4>& keys) {
+    std::ofstream configFile("config.cfg", ios::trunc);
+    if (!configFile.is_open()) {
+        return false;
+    }
+
+    configFile << "[Group]\n";
+    configFile << "key1=" << keys[0] << "\n";
+    configFile << "key2=" << keys[1] << "\n\n";
+    configFile << "[Group]\n";
+    configFile << "key3=" << keys[2] << "\n";
+    configFile << "key4=" << keys[3] << "\n\n\n";
+    configFile << "# 修改并保存后，请在界面点击“重启并应用”。\n";
+    configFile << "# 也可以继续使用界面中的按键编辑区调整这四个按键。\n";
+    configFile << "# 更多按键绑定说明：https://github.com/cafali/SnapKey/wiki/Rebinding-Keys\n\n";
+    configFile << "# 常用默认方案：\n";
+    configFile << "# AZERTY: key1=81 key2=68 / key3=90 key4=83\n";
+    configFile << "# QWERTY: key1=65 key2=68 / key3=83 key4=87\n";
+    configFile << "# 方向键: key1=38 key2=40 / key3=37 key4=39\n";
+
+    return true;
+}
+
 // restart
 void RestartSnapKey() {
-    TCHAR szExeFileName[MAX_PATH];
-    GetModuleFileName(NULL, szExeFileName, MAX_PATH);
-    ShellExecute(NULL, NULL, szExeFileName, NULL, NULL, SW_SHOWNORMAL);
+    WCHAR szExeFileName[MAX_PATH];
+    GetModuleFileNameW(NULL, szExeFileName, MAX_PATH);
+    ShellExecuteW(NULL, NULL, szExeFileName, NULL, NULL, SW_SHOWNORMAL);
     PostQuitMessage(0);
 }
 
@@ -104,41 +208,43 @@ int main() {
         return 1;
     }
 
-    hMutex = CreateMutex(NULL, TRUE, TEXT("SnapKeyMutex"));
+    hMutex = CreateMutexW(NULL, TRUE, L"SnapKeyMutex");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        MessageBox(NULL, TEXT("SnapKey is already running!"), TEXT("SnapKey"), MB_ICONINFORMATION | MB_OK);
+        MessageBoxW(NULL, L"SnapKey 已在运行，无需重复启动。", L"SnapKey", MB_ICONINFORMATION | MB_OK);
         return 1;
     }
 
-    WNDCLASSEX wc = {0};
-    wc.cbSize = sizeof(WNDCLASSEX);
+    WNDCLASSEXW wc = {0};
+    wc.cbSize = sizeof(WNDCLASSEXW);
     wc.lpfnWndProc = WndProc;
-    wc.hInstance = GetModuleHandle(NULL);
-    wc.lpszClassName = TEXT("SnapKeyClass");
+    wc.hInstance = GetModuleHandleW(NULL);
+    wc.lpszClassName = L"SnapKeyClass";
 
-    if (!RegisterClassEx(&wc)) {
-        MessageBox(NULL, TEXT("Window Registration Failed!"), TEXT("Error"), MB_ICONEXCLAMATION | MB_OK);
+    if (!RegisterClassExW(&wc)) {
+        MessageBoxW(NULL, L"窗口注册失败，请尝试重新启动 SnapKey。", L"SnapKey 错误", MB_ICONEXCLAMATION | MB_OK);
         ReleaseMutex(hMutex);
         CloseHandle(hMutex);
         return 1;
     }
 
-    HWND hwnd = CreateWindowEx(0, wc.lpszClassName, TEXT("SnapKey"), WS_OVERLAPPEDWINDOW,
-                               CW_USEDEFAULT, CW_USEDEFAULT, 240, 120,
-                               NULL, NULL, wc.hInstance, NULL);
+    HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"SnapKey 中文版", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+                                CW_USEDEFAULT, CW_USEDEFAULT, 560, 520,
+                                NULL, NULL, wc.hInstance, NULL);
 
     if (hwnd == NULL) {
-        MessageBox(NULL, TEXT("Window Creation Failed!"), TEXT("Error"), MB_ICONEXCLAMATION | MB_OK);
+        MessageBoxW(NULL, L"窗口创建失败，请尝试重新启动 SnapKey。", L"SnapKey 错误", MB_ICONEXCLAMATION | MB_OK);
         ReleaseMutex(hMutex);
         CloseHandle(hMutex);
         return 1;
     }
 
+    hMainWindow = hwnd;
     InitNotifyIconData(hwnd);
+    ShowMainWindow(hwnd);
 
     hHook = SetWindowsHookEx(WH_KEYBOARD_LL, KeyboardProc, NULL, 0);
     if (hHook == NULL) {
-        MessageBox(NULL, TEXT("Failed to install hook!"), TEXT("Error"), MB_ICONEXCLAMATION | MB_OK);
+        MessageBoxW(NULL, L"键盘监听安装失败，请以普通方式重新启动，或检查安全软件拦截。", L"SnapKey 错误", MB_ICONEXCLAMATION | MB_OK);
         ReleaseMutex(hMutex);
         CloseHandle(hMutex);
         return 1;
@@ -151,7 +257,7 @@ int main() {
     }
 
     UnhookWindowsHookEx(hHook);
-    Shell_NotifyIcon(NIM_DELETE, &nid);
+    Shell_NotifyIconW(NIM_DELETE, &nid);
     ReleaseMutex(hMutex);
     CloseHandle(hMutex);
 
@@ -224,21 +330,254 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
 }
 
 void InitNotifyIconData(HWND hwnd) {
-    memset(&nid, 0, sizeof(NOTIFYICONDATA));
-    nid.cbSize = sizeof(NOTIFYICONDATA);
+    memset(&nid, 0, sizeof(NOTIFYICONDATAW));
+    nid.cbSize = sizeof(NOTIFYICONDATAW);
     nid.hWnd = hwnd;
     nid.uID = ID_TRAY_APP_ICON;
     nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     nid.uCallbackMessage = WM_TRAYICON;
 
-    HICON hIcon = (HICON)LoadImage(NULL, TEXT("icon.ico"), IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
+    HICON hIcon = (HICON)LoadImageW(NULL, L"icon.ico", IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
     nid.hIcon = hIcon ? hIcon : LoadIcon(NULL, IDI_APPLICATION);
-    lstrcpy(nid.szTip, TEXT("SnapKey"));
-    Shell_NotifyIcon(NIM_ADD, &nid);
+    lstrcpynW(nid.szTip, L"SnapKey - 已启用（右键打开菜单，双击暂停）", ARRAYSIZE(nid.szTip));
+    Shell_NotifyIconW(NIM_ADD, &nid);
+}
+
+void UpdateTrayIconState() {
+    HICON hIcon = isLocked
+        ? (HICON)LoadImageW(NULL, L"icon_off.ico", IMAGE_ICON, 0, 0, LR_LOADFROMFILE)
+        : (HICON)LoadImageW(NULL, L"icon.ico", IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
+
+    if (hIcon) {
+        nid.hIcon = hIcon;
+    }
+
+    lstrcpynW(
+        nid.szTip,
+        isLocked ? L"SnapKey - 已暂停（双击恢复）" : L"SnapKey - 已启用（右键打开菜单，双击暂停）",
+        ARRAYSIZE(nid.szTip)
+    );
+    Shell_NotifyIconW(NIM_MODIFY, &nid);
+
+    if (hIcon) {
+        DestroyIcon(hIcon);
+    }
+}
+
+void ToggleSnapKeyState() {
+    isLocked = !isLocked;
+    UpdateTrayIconState();
+    RefreshMainWindowControls();
+}
+
+void FillProfileCombo(HWND comboBox) {
+    SendMessageW(comboBox, CB_RESETCONTENT, 0, 0);
+
+    vector<string> layouts = ListLayouts();
+    for (auto& layout : layouts) {
+        wstring label = GetLayoutDisplayName(layout);
+        SendMessageW(comboBox, CB_ADDSTRING, 0, (LPARAM)label.c_str());
+    }
+
+    if (!layouts.empty()) {
+        SendMessageW(comboBox, CB_SETCURSEL, 0, 0);
+    }
+}
+
+void FillKeyCombo(HWND comboBox, int selectedKeyCode) {
+    SendMessageW(comboBox, CB_RESETCONTENT, 0, 0);
+
+    int selectedIndex = 0;
+    for (int i = 0; i < (int)KEY_OPTIONS.size(); i++) {
+        wstringstream label;
+        label << KEY_OPTIONS[i].label << L" (" << KEY_OPTIONS[i].code << L")";
+        SendMessageW(comboBox, CB_ADDSTRING, 0, (LPARAM)label.str().c_str());
+        SendMessageW(comboBox, CB_SETITEMDATA, i, KEY_OPTIONS[i].code);
+        if (KEY_OPTIONS[i].code == selectedKeyCode) {
+            selectedIndex = i;
+        }
+    }
+
+    SendMessageW(comboBox, CB_SETCURSEL, selectedIndex, 0);
+}
+
+void RefreshKeyEditorControls() {
+    std::array<int, 4> keys = ReadConfigKeyValues();
+    for (int i = 0; i < 4; i++) {
+        if (hKeyCombos[i]) {
+            FillKeyCombo(hKeyCombos[i], keys[i]);
+        }
+    }
+}
+
+void RefreshMainWindowControls() {
+    if (hStatusLabel) {
+        SetWindowTextW(hStatusLabel, isLocked ? L"当前状态：已暂停，按键处理暂不生效" : L"当前状态：已启用，按键处理正在运行");
+    }
+
+    if (hToggleButton) {
+        SetWindowTextW(hToggleButton, isLocked ? L"启用 SnapKey" : L"暂停 SnapKey");
+    }
+
+    if (hProfileCombo && SendMessageW(hProfileCombo, CB_GETCOUNT, 0, 0) == 0) {
+        FillProfileCombo(hProfileCombo);
+    }
+}
+
+void SaveKeysFromEditor(HWND hwnd) {
+    std::array<int, 4> keys = {65, 68, 83, 87};
+
+    for (int i = 0; i < 4; i++) {
+        int selectedIndex = (int)SendMessageW(hKeyCombos[i], CB_GETCURSEL, 0, 0);
+        if (selectedIndex < 0) {
+            MessageBoxW(hwnd, L"请把四个按键都选择完整。", L"SnapKey", MB_ICONINFORMATION | MB_OK);
+            return;
+        }
+        keys[i] = (int)SendMessageW(hKeyCombos[i], CB_GETITEMDATA, selectedIndex, 0);
+    }
+
+    for (int i = 0; i < 4; i++) {
+        for (int j = i + 1; j < 4; j++) {
+            if (keys[i] == keys[j]) {
+                MessageBoxW(hwnd, L"四个按键不能重复，请重新选择。", L"SnapKey 配置提示", MB_ICONEXCLAMATION | MB_OK);
+                return;
+            }
+        }
+    }
+
+    if (!SaveConfigKeyValues(keys)) {
+        MessageBoxW(hwnd, L"保存配置失败，请检查 config.cfg 是否被占用。", L"SnapKey 错误", MB_ICONERROR | MB_OK);
+        return;
+    }
+
+    if (MessageBoxW(hwnd, L"按键配置已保存。需要重启 SnapKey 后才会生效，是否现在重启？",
+                    L"保存成功", MB_YESNO | MB_ICONQUESTION) == IDYES) {
+        RestartSnapKey();
+    }
+}
+
+void CreateMainWindowControls(HWND hwnd) {
+    hUiFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+
+    auto createText = [&](const wchar_t* text, int x, int y, int width, int height, int id = 0) -> HWND {
+        HWND control = CreateWindowExW(0, L"STATIC", text, WS_CHILD | WS_VISIBLE,
+                                      x, y, width, height, hwnd, (HMENU)(INT_PTR)id, NULL, NULL);
+        SendMessageW(control, WM_SETFONT, (WPARAM)hUiFont, TRUE);
+        return control;
+    };
+
+    auto createButton = [&](const wchar_t* text, int x, int y, int width, int height, int id) -> HWND {
+        HWND control = CreateWindowExW(0, L"BUTTON", text, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+                                      x, y, width, height, hwnd, (HMENU)(INT_PTR)id, NULL, NULL);
+        SendMessageW(control, WM_SETFONT, (WPARAM)hUiFont, TRUE);
+        return control;
+    };
+
+    createText(L"SnapKey 中文版", 24, 20, 300, 28);
+    createText(L"用于管理按键互斥、配置方案和运行状态。关闭窗口后程序仍会留在托盘运行。", 24, 52, 450, 24);
+
+    hStatusLabel = createText(L"", 24, 92, 440, 24, ID_UI_STATUS_LABEL);
+    hToggleButton = createButton(L"", 24, 126, 140, 36, ID_UI_TOGGLE_LOCK);
+    createButton(L"打开配置文件", 178, 126, 140, 36, ID_UI_OPEN_CONFIG_FILE);
+    createButton(L"重启并应用", 332, 126, 140, 36, ID_UI_RESTART);
+
+    createText(L"配置方案", 24, 184, 100, 24);
+    hProfileCombo = CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST,
+                                    104, 180, 214, 180, hwnd, (HMENU)(INT_PTR)ID_UI_PROFILE_COMBO, NULL, NULL);
+    SendMessageW(hProfileCombo, WM_SETFONT, (WPARAM)hUiFont, TRUE);
+    createButton(L"应用方案", 332, 178, 140, 36, ID_UI_APPLY_PROFILE);
+
+    createText(L"界面化编辑按键", 24, 238, 160, 24);
+    createText(L"第一组按键", 24, 272, 90, 24);
+    hKeyCombos[0] = CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST,
+                                    104, 268, 150, 180, hwnd, (HMENU)(INT_PTR)ID_UI_KEY1_COMBO, NULL, NULL);
+    hKeyCombos[1] = CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST,
+                                    270, 268, 150, 180, hwnd, (HMENU)(INT_PTR)ID_UI_KEY2_COMBO, NULL, NULL);
+    createText(L"第二组按键", 24, 314, 90, 24);
+    hKeyCombos[2] = CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST,
+                                    104, 310, 150, 180, hwnd, (HMENU)(INT_PTR)ID_UI_KEY3_COMBO, NULL, NULL);
+    hKeyCombos[3] = CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST,
+                                    270, 310, 150, 180, hwnd, (HMENU)(INT_PTR)ID_UI_KEY4_COMBO, NULL, NULL);
+
+    for (int i = 0; i < 4; i++) {
+        SendMessageW(hKeyCombos[i], WM_SETFONT, (WPARAM)hUiFont, TRUE);
+    }
+
+    createButton(L"保存按键配置", 104, 356, 150, 34, ID_UI_SAVE_KEYS);
+    createText(L"保存后需要重启才会生效。每组内后按下的键会接管前一个键。", 24, 404, 480, 24);
+
+    createButton(L"使用说明", 24, 438, 104, 34, ID_UI_HELP);
+    createButton(L"关于", 142, 438, 104, 34, ID_UI_ABOUT);
+    createButton(L"退出程序", 368, 438, 104, 34, ID_UI_EXIT);
+
+    FillProfileCombo(hProfileCombo);
+    RefreshKeyEditorControls();
+    RefreshMainWindowControls();
+}
+
+void ShowMainWindow(HWND hwnd) {
+    ShowWindow(hwnd, SW_SHOWNORMAL);
+    SetForegroundWindow(hwnd);
+    RefreshMainWindowControls();
+}
+
+void ApplySelectedProfile(HWND hwnd) {
+    int selectedIndex = (int)SendMessageW(hProfileCombo, CB_GETCURSEL, 0, 0);
+    vector<string> layouts = ListLayouts();
+    if (selectedIndex < 0 || selectedIndex >= (int)layouts.size()) {
+        MessageBoxW(hwnd, L"请先选择一个配置方案。", L"SnapKey", MB_ICONINFORMATION | MB_OK);
+        return;
+    }
+
+    if (MessageBoxW(hwnd, L"应用方案后会自动重启 SnapKey，是否继续？", L"应用配置方案",
+                    MB_YESNO | MB_ICONQUESTION) == IDYES) {
+        ApplyLayout(layouts[selectedIndex]);
+        RestartSnapKey();
+    }
+}
+
+std::wstring GetLayoutDisplayName(const std::string& layoutName) {
+    static const unordered_map<string, wstring> layoutLabels = {
+        {"ARROW Keys", L"方向键方案"},
+        {"AZERTY Layout", L"AZERTY 键盘方案"},
+        {"CUSTOM Profile", L"自定义方案"},
+        {"ESDF Keys", L"ESDF 方案"},
+        {"WASD Keys", L"WASD 默认方案"}
+    };
+
+    auto found = layoutLabels.find(layoutName);
+    if (found != layoutLabels.end()) {
+        return found->second;
+    }
+
+    int sizeNeeded = MultiByteToWideChar(CP_UTF8, 0, layoutName.c_str(), -1, NULL, 0);
+    if (sizeNeeded <= 0) {
+        return L"未命名方案";
+    }
+
+    wstring result(sizeNeeded, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, layoutName.c_str(), -1, &result[0], sizeNeeded);
+    if (!result.empty() && result.back() == L'\0') {
+        result.pop_back();
+    }
+    return result;
+}
+
+void OpenHelpDocument() {
+    if (fs::exists("README.md")) {
+        ShellExecuteW(NULL, L"open", L"README.md", NULL, NULL, SW_SHOWNORMAL);
+        return;
+    }
+
+    ShellExecuteW(NULL, L"open", L"README.pdf", NULL, NULL, SW_SHOWNORMAL);
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
+    case WM_CREATE:
+        CreateMainWindowControls(hwnd);
+        break;
+
     case WM_TRAYICON:
         if (lParam == WM_RBUTTONDOWN) {
             POINT curPoint;
@@ -246,96 +585,106 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             SetForegroundWindow(hwnd);
 
             HMENU hMenu = CreatePopupMenu();
-            AppendMenu(hMenu, MF_STRING, ID_TRAY_REBIND_KEYS, TEXT("Rebind Keys"));
+            AppendMenuW(hMenu, MF_GRAYED, ID_TRAY_STATUS, isLocked ? L"当前状态：已暂停" : L"当前状态：已启用");
+            AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_SHOW_WINDOW, L"打开主界面");
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_REBIND_KEYS, L"编辑按键配置");
 
-            // submenu layouts
+            // 配置方案只改变 config.cfg，不改按键处理逻辑。
             HMENU hSubMenu = CreatePopupMenu();
             vector<string> layouts = ListLayouts();
             if (!layouts.empty()) {
                 int id = 0;
                 for (auto& layout : layouts) {
-                    AppendMenuA(hSubMenu, MF_STRING, ID_LAYOUT_BASE + id, layout.c_str());
+                    wstring label = GetLayoutDisplayName(layout);
+                    AppendMenuW(hSubMenu, MF_STRING, ID_LAYOUT_BASE + id, label.c_str());
                     id++;
                 }
             } else {
-                AppendMenu(hSubMenu, MF_GRAYED, 0, TEXT("No layouts found"));
+                AppendMenuW(hSubMenu, MF_GRAYED, 0, L"未找到配置方案");
             }
-            AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hSubMenu, TEXT("Select Profile"));
+            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hSubMenu, L"选择配置方案");
 
-            AppendMenu(hMenu, MF_STRING, ID_TRAY_RESTART_SNAPKEY, TEXT("Restart SnapKey"));
-            AppendMenu(hMenu, MF_STRING, ID_TRAY_LOCK_FUNCTION, isLocked ? TEXT("Enable SnapKey") : TEXT("Disable SnapKey"));
-            AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
-            AppendMenu(hMenu, MF_STRING, ID_TRAY_HELP, TEXT("Get Help"));
-            AppendMenu(hMenu, MF_STRING, ID_TRAY_CHECKUPDATE, TEXT("Check Updates"));
-            AppendMenu(hMenu, MF_STRING, ID_TRAY_VERSION_INFO, TEXT("Version Info (1.2.9)"));
-            AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
-            AppendMenu(hMenu, MF_STRING, ID_TRAY_EXIT_CONTEXT_MENU_ITEM, TEXT("Exit SnapKey"));
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_RESTART_SNAPKEY, L"重启并应用配置");
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_LOCK_FUNCTION, isLocked ? L"启用 SnapKey" : L"暂停 SnapKey");
+            AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_HELP, L"使用说明");
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_CHECKUPDATE, L"检查更新");
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_VERSION_INFO, L"关于 SnapKey");
+            AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT_CONTEXT_MENU_ITEM, L"退出 SnapKey");
 
             TrackPopupMenu(hMenu, TPM_BOTTOMALIGN | TPM_LEFTALIGN, curPoint.x, curPoint.y, 0, hwnd, NULL);
             DestroyMenu(hMenu);
         }
         else if (lParam == WM_LBUTTONDBLCLK) {
-            isLocked = !isLocked;
-            HICON hIcon = isLocked
-                ? (HICON)LoadImage(NULL, TEXT("icon_off.ico"), IMAGE_ICON, 0, 0, LR_LOADFROMFILE)
-                : (HICON)LoadImage(NULL, TEXT("icon.ico"), IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
-            if (hIcon) {
-                nid.hIcon = hIcon;
-                Shell_NotifyIcon(NIM_MODIFY, &nid);
-                DestroyIcon(hIcon);
-            }
+            ShowMainWindow(hwnd);
         }
         break;
 
     case WM_COMMAND:
-        if (LOWORD(wParam) >= ID_LAYOUT_BASE) {
-            int layoutIndex = LOWORD(wParam) - ID_LAYOUT_BASE;
+        {
+            int commandId = LOWORD(wParam);
             vector<string> layouts = ListLayouts();
+            int layoutIndex = commandId - ID_LAYOUT_BASE;
+
             if (layoutIndex >= 0 && layoutIndex < (int)layouts.size()) {
                 ApplyLayout(layouts[layoutIndex]);
                 RestartSnapKey(); // restart after applying layout
+                break;
             }
-        }
-        else {
-            switch (LOWORD(wParam)) {
+
+            switch (commandId) {
+            case ID_TRAY_SHOW_WINDOW:
+                ShowMainWindow(hwnd);
+                break;
             case ID_TRAY_EXIT_CONTEXT_MENU_ITEM:
+            case ID_UI_EXIT:
                 PostQuitMessage(0);
                 break;
             case ID_TRAY_VERSION_INFO:
-                MessageBox(hwnd, GetVersionInfo().c_str(), TEXT("SnapKey Version Info"), MB_OK);
+            case ID_UI_ABOUT:
+                MessageBoxW(hwnd, GetVersionInfoText().c_str(), L"关于 SnapKey", MB_OK | MB_ICONINFORMATION);
                 break;
             case ID_TRAY_REBIND_KEYS:
-                ShellExecute(NULL, TEXT("open"), TEXT("config.cfg"), NULL, NULL, SW_SHOWNORMAL);
+            case ID_UI_EDIT_CONFIG:
+                ShowMainWindow(hwnd);
+                break;
+            case ID_UI_OPEN_CONFIG_FILE:
+                ShellExecuteW(NULL, L"open", L"config.cfg", NULL, NULL, SW_SHOWNORMAL);
                 break;
             case ID_TRAY_HELP:
-                ShellExecute(NULL, TEXT("open"), TEXT("README.pdf"), NULL, NULL, SW_SHOWNORMAL);
+            case ID_UI_HELP:
+                OpenHelpDocument();
                 break;
             case ID_TRAY_CHECKUPDATE:
-                if (MessageBox(NULL,
-                               TEXT("You are about to visit the SnapKey GitHub page. Continue?"),
-                               TEXT("Update SnapKey"),
+                if (MessageBoxW(NULL,
+                               L"即将打开 SnapKey 发布页面，用于查看新版本。是否继续？",
+                               L"检查更新",
                                MB_YESNO | MB_ICONQUESTION) == IDYES) {
-                    ShellExecute(NULL, TEXT("open"), TEXT("https://github.com/cafali/SnapKey/releases"), NULL, NULL, SW_SHOWNORMAL);
+                    ShellExecuteW(NULL, L"open", L"https://github.com/cafali/SnapKey/releases", NULL, NULL, SW_SHOWNORMAL);
                 }
                 break;
             case ID_TRAY_RESTART_SNAPKEY:
+            case ID_UI_RESTART:
                 RestartSnapKey();
                 break;
             case ID_TRAY_LOCK_FUNCTION:
-                isLocked = !isLocked;
-                {
-                    HICON hIcon = isLocked
-                        ? (HICON)LoadImage(NULL, TEXT("icon_off.ico"), IMAGE_ICON, 0, 0, LR_LOADFROMFILE)
-                        : (HICON)LoadImage(NULL, TEXT("icon.ico"), IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
-                    if (hIcon) {
-                        nid.hIcon = hIcon;
-                        Shell_NotifyIcon(NIM_MODIFY, &nid);
-                        DestroyIcon(hIcon);
-                    }
-                }
+            case ID_UI_TOGGLE_LOCK:
+                ToggleSnapKeyState();
+                break;
+            case ID_UI_APPLY_PROFILE:
+                ApplySelectedProfile(hwnd);
+                break;
+            case ID_UI_SAVE_KEYS:
+                SaveKeysFromEditor(hwnd);
                 break;
             }
         }
+        break;
+
+    case WM_CLOSE:
+        ShowWindow(hwnd, SW_HIDE);
         break;
 
     case WM_DESTROY:
@@ -343,7 +692,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         break;
 
     default:
-        return DefWindowProc(hwnd, msg, wParam, lParam);
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
     return 0;
 }
@@ -355,14 +704,25 @@ std::string GetVersionInfo() {
            "License: MIT License\n";
 }
 
+std::wstring GetVersionInfoText() {
+    return L"SnapKey v1.2.9 (R18)\n"
+           L"版本日期：2025 年 8 月 8 日\n"
+           L"项目地址：github.com/cafali/SnapKey\n"
+           L"许可证：MIT License\n\n"
+           L"操作提示：\n"
+           L"- 右键托盘图标：打开菜单\n"
+           L"- 双击托盘图标：暂停 / 启用\n"
+           L"- 修改 config.cfg 后，请重启 SnapKey 生效\n";
+}
+
 void RestoreConfigFromBackup(const std::string& backupFilename, const std::string& destinationFilename) {
     std::string sourcePath = "meta\\" + backupFilename;
     std::string destinationPath = destinationFilename;
 
     if (CopyFile(sourcePath.c_str(), destinationPath.c_str(), FALSE)) {
-        MessageBox(NULL, TEXT("Default config restored from backup successfully."), TEXT("SnapKey"), MB_ICONINFORMATION | MB_OK);
+        MessageBoxW(NULL, L"已从备份恢复默认配置。请重新启动 SnapKey。", L"SnapKey", MB_ICONINFORMATION | MB_OK);
     } else {
-        MessageBox(NULL, TEXT("Failed to restore config from backup."), TEXT("SnapKey Error"), MB_ICONERROR | MB_OK);
+        MessageBoxW(NULL, L"无法从备份恢复默认配置，请检查 meta 目录是否完整。", L"SnapKey 错误", MB_ICONERROR | MB_OK);
     }
 }
 
@@ -392,9 +752,9 @@ bool LoadConfig(const std::string& filename) {
                     KeyInfo[value].registered = true;
                     KeyInfo[value].group = id;
                 } else {
-                    MessageBox(NULL,
-                               TEXT("The config file contains duplicate keys. Please review the setup."),
-                               TEXT("SnapKey Error"), MB_ICONEXCLAMATION | MB_OK);
+                    MessageBoxW(NULL,
+                               L"配置文件中存在重复按键，请检查 config.cfg 中的 key 数值。",
+                               L"SnapKey 配置错误", MB_ICONEXCLAMATION | MB_OK);
                     return false;
                 }
             }
