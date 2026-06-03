@@ -47,6 +47,7 @@ namespace fs = std::filesystem;
 #define ID_UI_OPEN_CONFIG_FILE          5015
 #define ID_UI_DELAY_MIN_EDIT            5016
 #define ID_UI_DELAY_MAX_EDIT            5017
+#define ID_UI_RELEASE_TAP_EDIT          5018
 
 struct KeyState {
     bool registered = false;
@@ -62,6 +63,7 @@ struct GroupState {
 
 unordered_map<int, GroupState> GroupInfo;
 unordered_map<int, KeyState> KeyInfo;
+unordered_map<int, vector<int>> GroupKeys;
 
 HHOOK hHook = NULL;
 HANDLE hMutex = NULL;
@@ -73,10 +75,12 @@ HWND hToggleButton = NULL;
 HWND hKeyCombos[4] = { NULL, NULL, NULL, NULL };
 HWND hDelayMinEdit = NULL;
 HWND hDelayMaxEdit = NULL;
+HWND hReleaseTapEdit = NULL;
 HFONT hUiFont = NULL;
 bool isLocked = false;
 int releaseDelayMinMs = 1;
 int releaseDelayMaxMs = 8;
+int releaseTapDurationMs = 9;
 std::mt19937 releaseDelayGenerator;
 LARGE_INTEGER performanceFrequency = {0};
 
@@ -113,7 +117,9 @@ void InitReleaseDelayRuntime();
 int GetRandomReleaseDelayMs();
 void WaitPreciseDelay(int delayMs);
 void SendKeyUpAfterDelay(int targetKey);
+void SendReleaseTapAfterKeyUp(int releasedKey);
 void NormalizeReleaseDelayConfig();
+void NormalizeReleaseTapConfig();
 void UpdateTrayIconState();
 void ToggleSnapKeyState();
 void OpenHelpDocument();
@@ -129,6 +135,7 @@ std::array<int, 4> ReadConfigKeyValues();
 bool SaveConfigKeyValues(const std::array<int, 4>& keys);
 void RefreshKeyEditorControls();
 bool ReadDelayEditorValues(HWND hwnd, int& minMs, int& maxMs);
+bool ReadReleaseTapEditorValue(HWND hwnd, int& durationMs);
 void SaveKeysFromEditor(HWND hwnd);
 
 // select layout via context menu v 1.2.9
@@ -201,10 +208,12 @@ bool SaveConfigKeyValues(const std::array<int, 4>& keys) {
     configFile << "key4=" << keys[3] << "\n\n";
     configFile << "[Settings]\n";
     configFile << "releaseDelayMinMs=" << releaseDelayMinMs << "\n";
-    configFile << "releaseDelayMaxMs=" << releaseDelayMaxMs << "\n\n\n";
+    configFile << "releaseDelayMaxMs=" << releaseDelayMaxMs << "\n";
+    configFile << "releaseTapDurationMs=" << releaseTapDurationMs << "\n\n\n";
     configFile << "# 修改并保存后，请在界面点击“重启并应用”。\n";
     configFile << "# 也可以继续使用界面中的按键编辑区调整这四个按键。\n";
     configFile << "# releaseDelayMinMs / releaseDelayMaxMs：同组新按键接管旧按键时，释放旧按键前的随机延迟范围（毫秒）。\n";
+    configFile << "# releaseTapDurationMs：松开某键并等待随机延迟后，自动短按同组另一键的固定持续时间（毫秒）；设为 0 可关闭。\n";
     configFile << "# 更多按键绑定说明：https://github.com/cafali/SnapKey/wiki/Rebinding-Keys\n\n";
     configFile << "# 常用默认方案：\n";
     configFile << "# AZERTY: key1=81 key2=68 / key3=90 key4=83\n";
@@ -249,7 +258,7 @@ int main() {
     }
 
     HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"SnapKey 中文版", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-                                CW_USEDEFAULT, CW_USEDEFAULT, 560, 580,
+                                CW_USEDEFAULT, CW_USEDEFAULT, 560, 620,
                                 NULL, NULL, wc.hInstance, NULL);
 
     if (hwnd == NULL) {
@@ -305,6 +314,8 @@ void handleKeyDown(int keyCode) {
 void handleKeyUp(int keyCode) {
     KeyState& currentKeyInfo = KeyInfo[keyCode];
     GroupState& currentGroupInfo = GroupInfo[currentKeyInfo.group];
+    bool shouldReleaseTap = false;
+
     if (currentGroupInfo.previousKey == keyCode && !currentKeyInfo.keyDown) {
         currentGroupInfo.previousKey = 0;
     }
@@ -319,7 +330,12 @@ void handleKeyUp(int keyCode) {
             currentGroupInfo.previousKey = 0;
             if (currentGroupInfo.activeKey == keyCode) currentGroupInfo.activeKey = 0;
             SendKey(keyCode, false);
+            shouldReleaseTap = currentGroupInfo.activeKey == 0;
         }
+    }
+
+    if (shouldReleaseTap) {
+        SendReleaseTapAfterKeyUp(keyCode);
     }
 }
 
@@ -363,6 +379,34 @@ void SendKeyUpAfterDelay(int targetKey) {
     }).detach();
 }
 
+void SendReleaseTapAfterKeyUp(int releasedKey) {
+    if (releaseTapDurationMs <= 0) {
+        return;
+    }
+
+    int groupId = KeyInfo[releasedKey].group;
+    auto groupIt = GroupKeys.find(groupId);
+    if (groupIt == GroupKeys.end() || groupIt->second.size() != 2) {
+        return;
+    }
+
+    int targetKey = groupIt->second[0] == releasedKey ? groupIt->second[1] : groupIt->second[0];
+    if (targetKey == releasedKey || KeyInfo[targetKey].keyDown || GroupInfo[groupId].activeKey != 0) {
+        return;
+    }
+
+    int delayMs = GetRandomReleaseDelayMs();
+    int durationMs = releaseTapDurationMs;
+    std::thread([targetKey, delayMs, durationMs]() {
+        WaitPreciseDelay(delayMs);
+        SendKey(targetKey, true);
+        WaitPreciseDelay(durationMs);
+        if (!KeyInfo[targetKey].keyDown) {
+            SendKey(targetKey, false);
+        }
+    }).detach();
+}
+
 void NormalizeReleaseDelayConfig() {
     if (releaseDelayMinMs < 0) releaseDelayMinMs = 0;
     if (releaseDelayMaxMs < 0) releaseDelayMaxMs = 0;
@@ -373,6 +417,11 @@ void NormalizeReleaseDelayConfig() {
         releaseDelayMinMs = releaseDelayMaxMs;
         releaseDelayMaxMs = temp;
     }
+}
+
+void NormalizeReleaseTapConfig() {
+    if (releaseTapDurationMs < 0) releaseTapDurationMs = 0;
+    if (releaseTapDurationMs > 1000) releaseTapDurationMs = 1000;
 }
 
 void SendKey(int targetKey, bool keyDown) {
@@ -486,6 +535,9 @@ void RefreshKeyEditorControls() {
     if (hDelayMaxEdit) {
         SetWindowTextW(hDelayMaxEdit, std::to_wstring(releaseDelayMaxMs).c_str());
     }
+    if (hReleaseTapEdit) {
+        SetWindowTextW(hReleaseTapEdit, std::to_wstring(releaseTapDurationMs).c_str());
+    }
 }
 
 void RefreshMainWindowControls() {
@@ -533,6 +585,27 @@ bool ReadDelayEditorValues(HWND hwnd, int& minMs, int& maxMs) {
     return true;
 }
 
+bool ReadReleaseTapEditorValue(HWND hwnd, int& durationMs) {
+    wchar_t durationText[16] = {0};
+    GetWindowTextW(hReleaseTapEdit, durationText, ARRAYSIZE(durationText));
+
+    wchar_t* durationEnd = nullptr;
+    long parsedDuration = wcstol(durationText, &durationEnd, 10);
+
+    if (durationText[0] == L'\0' || *durationEnd != L'\0') {
+        MessageBoxW(hwnd, L"松开短按时长请输入 0 到 1000 之间的整数。", L"SnapKey 配置提示", MB_ICONEXCLAMATION | MB_OK);
+        return false;
+    }
+
+    if (parsedDuration < 0 || parsedDuration > 1000) {
+        MessageBoxW(hwnd, L"松开短按时长必须在 0 到 1000 毫秒之间。", L"SnapKey 配置提示", MB_ICONEXCLAMATION | MB_OK);
+        return false;
+    }
+
+    durationMs = (int)parsedDuration;
+    return true;
+}
+
 void SaveKeysFromEditor(HWND hwnd) {
     std::array<int, 4> keys = {65, 68, 83, 87};
 
@@ -556,12 +629,17 @@ void SaveKeysFromEditor(HWND hwnd) {
 
     int newDelayMinMs = releaseDelayMinMs;
     int newDelayMaxMs = releaseDelayMaxMs;
+    int newReleaseTapDurationMs = releaseTapDurationMs;
     if (!ReadDelayEditorValues(hwnd, newDelayMinMs, newDelayMaxMs)) {
+        return;
+    }
+    if (!ReadReleaseTapEditorValue(hwnd, newReleaseTapDurationMs)) {
         return;
     }
 
     releaseDelayMinMs = newDelayMinMs;
     releaseDelayMaxMs = newDelayMaxMs;
+    releaseTapDurationMs = newReleaseTapDurationMs;
 
     if (!SaveConfigKeyValues(keys)) {
         MessageBoxW(hwnd, L"保存配置失败，请检查 config.cfg 是否被占用。", L"SnapKey 错误", MB_ICONERROR | MB_OK);
@@ -635,12 +713,16 @@ void CreateMainWindowControls(HWND hwnd) {
     hDelayMaxEdit = createEdit(214, 352, 70, 26, ID_UI_DELAY_MAX_EDIT);
     createText(L"毫秒", 296, 356, 60, 24);
 
-    createButton(L"保存配置", 104, 398, 150, 34, ID_UI_SAVE_KEYS);
-    createText(L"保存后需要重启才会生效。随机延迟只作用于同组新按键接管旧按键。", 24, 448, 500, 24);
+    createText(L"松开短按", 24, 396, 90, 24);
+    hReleaseTapEdit = createEdit(104, 392, 70, 26, ID_UI_RELEASE_TAP_EDIT);
+    createText(L"毫秒", 186, 396, 60, 24);
 
-    createButton(L"使用说明", 24, 492, 104, 34, ID_UI_HELP);
-    createButton(L"关于", 142, 492, 104, 34, ID_UI_ABOUT);
-    createButton(L"退出程序", 368, 492, 104, 34, ID_UI_EXIT);
+    createButton(L"保存配置", 104, 438, 150, 34, ID_UI_SAVE_KEYS);
+    createText(L"保存后需要重启才会生效。松开短按会先等待上方随机延迟，再固定短按同组另一枚按键。", 24, 488, 500, 24);
+
+    createButton(L"使用说明", 24, 532, 104, 34, ID_UI_HELP);
+    createButton(L"关于", 142, 532, 104, 34, ID_UI_ABOUT);
+    createButton(L"退出程序", 368, 532, 104, 34, ID_UI_EXIT);
 
     FillProfileCombo(hProfileCombo);
     RefreshKeyEditorControls();
@@ -888,10 +970,17 @@ bool LoadConfig(const std::string& filename) {
                 releaseDelayMinMs = value;
             } else if (key == "releaseDelayMaxMs") {
                 releaseDelayMaxMs = value;
+            } else if (key == "releaseTapDurationMaxMs") {
+                releaseTapDurationMs = value;
+            } else if (key == "releaseTapDurationMinMs") {
+                continue;
+            } else if (key == "releaseTapDurationMs") {
+                releaseTapDurationMs = value;
             } else if (key.find("key") != string::npos) {
                 if (!KeyInfo[value].registered) {
                     KeyInfo[value].registered = true;
                     KeyInfo[value].group = id;
+                    GroupKeys[id].push_back(value);
                 } else {
                     MessageBoxW(NULL,
                                L"配置文件中存在重复按键，请检查 config.cfg 中的 key 数值。",
@@ -902,5 +991,6 @@ bool LoadConfig(const std::string& filename) {
         }
     }
     NormalizeReleaseDelayConfig();
+    NormalizeReleaseTapConfig();
     return true;
 }
